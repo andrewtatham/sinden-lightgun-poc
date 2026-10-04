@@ -1,0 +1,3 @@
+pygame-ce
+pyserial
+evdev; sys_platform == "linux"
