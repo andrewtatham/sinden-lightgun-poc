@@ -1,7 +1,8 @@
 # Sinden lightgun proof of concept
 
-A button/recoil tester plus two games for Sinden lightguns: a 1-4 player Duck Hunt clone and a
-bonus stage where you destroy a dysfunctional printer with machine guns and grenades.
+A button/recoil tester plus three games for Sinden lightguns: a 1-4 player Duck Hunt clone, a Point Blank style
+set of quick shooting challenges, and a bonus stage where you destroy a dysfunctional printer with
+machine guns and grenades.
 Python + pygame, runs on Linux and Windows, two guns on one PC or guns on different PCs over the LAN.
 
 ## Run it
@@ -24,7 +25,7 @@ clients just send their gun and show what the host shows. Port 5555/TCP.
 
 | Key | |
 |---|---|
-| F1 / F2 / F3 | Tester / Duck Hunt / Printer bonus stage |
+| F1 / F2 / F3 / F4 | Tester / Duck Hunt / Printer bonus stage / Point Blank |
 | - / = | thinner / thicker white tracking border |
 | F5 | one recoil kick on every gun |
 | F6 | ten rapid kicks |
@@ -35,7 +36,7 @@ clients just send their gun and show what the host shows. Port 5555/TCP.
 
 ## Games
 
-Switch between them on the host with F1 / F2 / F3. Clients on the LAN just see whatever the host is running.
+Switch between them on the host with F2 / F3 / F4 (F1 is the tester). Clients on the LAN just see whatever the host is running.
 
 ### Printer stage (F3)
 
@@ -49,6 +50,17 @@ dysfunctional printer in 45 seconds. Based on real-life events.
   finally `PLEASE NO`. It dents, cracks, smokes, sparks, pops its scanner lid and finally catches fire and
   explodes. Bullet holes build up as you shoot it.
 * Each player adds 300 health to the printer. At the end it shows how much damage each player did.
+
+### Point Blank (F4)
+
+Five quick challenges in a random order, 1-4 players all shooting at once and competing for the same
+targets. 8 shots a magazine, RELOAD refills. Highest total wins.
+
+* **Number order** - shoot targets 1 to 6 in order (the next one glows).
+* **Balloon pop** - 16 balloons float up; pop them before they escape.
+* **Clay pigeons** - 12 plates fly across the screen in arcs.
+* **Outlaws** - shoot the bandits (+150) as they pop out of the saloon windows, but shooting a townsperson costs 200.
+* **Bullseye** - five targets appear one at a time: 300 for the middle ring down to 100 for the edge.
 
 ### Duck Hunt (F2)
 

@@ -423,6 +423,217 @@ class Printer:
                           for q in self.parts]}
 
 
+class PointBlank:
+    """Point Blank style: a run of quick shooting challenges, everyone shooting at once."""
+    name = "pb"
+    MAG = 8
+    ORDER = ["num", "balloon", "plate", "bad", "bull"]
+    INFO = {"num": ("NUMBER ORDER", "Shoot the targets in order, 1 to 6!"),
+            "balloon": ("BALLOON POP", "Pop every balloon before it floats away!"),
+            "plate": ("CLAY PIGEONS", "Hit the flying plates!"),
+            "bad": ("OUTLAWS", "Shoot the outlaws - don't shoot the townsfolk!"),
+            "bull": ("BULLSEYE", "The closer to the middle, the more points!")}
+    TIME = {"num": 14, "balloon": 16, "plate": 14, "bad": 18, "bull": 16}
+    TOTAL = {"balloon": 16, "plate": 12, "bad": 16, "bull": 5}
+    SLOTS = [(250, 270), (640, 270), (1030, 270), (250, 500), (640, 500), (1030, 500)]
+
+    def __init__(self):
+        self.order = random.sample(self.ORDER, len(self.ORDER))
+        self.players = [self._fresh() for _ in range(MAXP)]
+        self.fx, self.si, self.kind, self.targets, self.nid = [], -1, None, [], 1
+        self.phase, self.pt, self.left, self.cleared = "intro", 0.0, 0.0, False
+        self.spawned, self.spawn_t, self.next_n, self.nmax = 0, 0.0, 1, 6
+        self.next_stage()
+
+    def _fresh(self):
+        return {"score": 0, "ammo": self.MAG, "msg": "", "gain": 0, "base": 0}
+
+    def _add(self, k, x, y, r, **kw):
+        t = {"id": self.nid, "k": k, "x": x, "y": y, "r": r, "n": 0, "t": 0.0, "life": 99.0,
+             "vx": 0.0, "vy": 0.0, "st": "live"}
+        t.update(kw)
+        self.nid += 1
+        self.targets.append(t)
+        return t
+
+    def next_stage(self):
+        self.si += 1
+        if self.si >= len(self.order):
+            self.phase, self.pt, self.targets, self.kind = "over", 10.0, [], None
+            return
+        self.kind = self.order[self.si]
+        self.phase, self.pt, self.cleared = "intro", 2.6, False
+        self.left, self.targets, self.spawned, self.spawn_t, self.next_n = float(self.TIME[self.kind]), [], 0, 0.4, 1
+        for p in self.players:
+            p.update(ammo=self.MAG, msg="", base=p["score"], gain=0)
+        if self.kind == "num":
+            pts, tries = [], 0
+            while len(pts) < 6 and tries < 600:
+                tries += 1
+                x, y = random.uniform(130, W - 130), random.uniform(150, H - 210)
+                if all(math.hypot(x - a, y - b) > 150 for a, b in pts):
+                    pts.append((x, y))
+            self.nmax = len(pts)
+            for n, (x, y) in enumerate(pts, 1):
+                self._add("num", x, y, 50, n=n)
+
+    @staticmethod
+    def pop(t):
+        a, life = t["t"], t["life"]
+        if a < 0.22:
+            return a / 0.22
+        return 1.0 if a < life - 0.22 else max(0.0, (life - a) / 0.22)
+
+    def _shoot(self, i, aim, hub):
+        p = self.players[i]
+        if p["ammo"] <= 0:
+            p["msg"] = "RELOAD!"
+            return
+        p["ammo"] -= 1
+        hub.recoil(i)
+        x, y = aim[0] * W, aim[1] * H
+        hit = None
+        for t in reversed(self.targets):
+            if t["st"] != "live" or (t["k"] in ("bad", "civ") and self.pop(t) < 0.45):
+                continue
+            if math.hypot(t["x"] - x, t["y"] - y) <= t["r"]:
+                hit = t
+                break
+        pts, txt = 0, ""
+        if hit:
+            k = hit["k"]
+            if k == "num":
+                if hit["n"] == self.next_n:
+                    pts, hit["st"] = 100, "dead"
+                    self.next_n += 1
+                else:
+                    txt, hit = "ORDER!", None
+            elif k == "bull":
+                d = math.hypot(hit["x"] - x, hit["y"] - y) / hit["r"]
+                pts = 300 if d < 0.2 else 200 if d < 0.45 else 150 if d < 0.7 else 100
+                hit["st"] = "dead"
+                self.spawn_t = 0.7
+            else:
+                pts = {"balloon": 100, "plate": 100, "bad": 150, "civ": -200}[k]
+                hit["st"] = "dead"
+        if hit:
+            p["score"] += pts
+            txt = ("%+d" % pts) + (" OOPS!" if pts < 0 else "")
+        self.fx.append([round(x), round(y), txt, 0.0, i, bool(hit and pts > 0)])
+        p["msg"] = txt
+
+    def _spawn(self, dt):
+        k = self.kind
+        if k in ("num",) or self.spawned >= self.TOTAL.get(k, 0):
+            return
+        if k == "bull":
+            if any(t["st"] == "live" for t in self.targets):
+                return
+        self.spawn_t -= dt
+        if self.spawn_t > 0:
+            return
+        n = self.spawned
+        self.spawned += 1
+        if k == "balloon":
+            self.spawn_t = random.uniform(0.35, 0.8)
+            self._add("balloon", random.uniform(130, W - 130), H - 90, 44, n=random.randrange(6),
+                      vx=random.uniform(-25, 25), vy=-random.uniform(90, 160))
+        elif k == "plate":
+            self.spawn_t = random.uniform(0.5, 1.0)
+            side = 1 if n % 2 == 0 else -1
+            self._add("plate", -40 if side > 0 else W + 40, random.uniform(380, 560), 40,
+                      vx=side * random.uniform(260, 420), vy=-random.uniform(380, 620))
+        elif k == "bad":
+            self.spawn_t = random.uniform(0.55, 0.95)
+            used = {t["slot"] for t in self.targets if t["st"] == "live"}
+            free = [j for j in range(len(self.SLOTS)) if j not in used]
+            if not free:
+                self.spawned -= 1
+                return
+            j = random.choice(free)
+            sx, sy = self.SLOTS[j]
+            self._add("bad" if random.random() < 0.65 else "civ", sx, sy + 10, 64, slot=j,
+                      life=max(0.9, 1.7 - 0.03 * n))
+        elif k == "bull":
+            self.spawn_t = 0.7
+            self._add("bull", random.uniform(200, W - 200), random.uniform(220, H - 280), 110, life=3.2)
+
+    def update(self, dt, hub):
+        for f in self.fx:
+            f[3] += dt
+        self.fx = [f for f in self.fx if f[3] < 0.9]
+        if self.phase == "over":
+            self.pt -= dt
+            if self.pt <= 0:
+                self.__init__()
+            return
+        if self.phase == "intro":
+            self.pt -= dt
+            if self.pt <= 0:
+                self.phase = "play"
+            return
+        if self.phase == "outro":
+            self.pt -= dt
+            if self.pt <= 0:
+                self.next_stage()
+            return
+        for i, sl in enumerate(hub.slots):
+            if not sl["c"]:
+                continue
+            for raw, logical, pressed in sl["ev"]:
+                if not pressed:
+                    continue
+                if logical == "TRIGGER":
+                    self._shoot(i, sl["aim"], hub)
+                elif logical == "RELOAD":
+                    self.players[i].update(ammo=self.MAG, msg="RELOADED")
+        self.left -= dt
+        self._spawn(dt)
+        for t in self.targets:
+            t["t"] += dt
+            k = t["k"]
+            if k == "balloon":
+                t["x"] += (t["vx"] + math.sin(t["t"] * 2.5 + t["id"]) * 40) * dt
+                t["y"] += t["vy"] * dt
+                if t["y"] < -70:
+                    t["st"] = "dead"
+            elif k == "plate":
+                t["vy"] += 520 * dt
+                t["x"] += t["vx"] * dt
+                t["y"] += t["vy"] * dt
+                if (t["vy"] > 0 and t["y"] > H - 40) or not -120 < t["x"] < W + 120:
+                    t["st"] = "dead"
+            elif k in ("bad", "civ", "bull") and t["t"] >= t["life"]:
+                t["st"] = "dead"
+                if k == "bull":
+                    self.spawn_t = 0.7
+        self.targets = [t for t in self.targets if t["st"] == "live"]
+        live = bool(self.targets)
+        if self.kind == "num":
+            self.cleared = self.next_n > self.nmax
+        else:
+            self.cleared = self.spawned >= self.TOTAL[self.kind] and not live
+        if self.cleared or self.left <= 0:
+            self.phase, self.pt = "outro", 2.0
+            for p in self.players:
+                p["gain"] = p["score"] - p["base"]
+                p["msg"] = ""
+
+    def key(self, k, hub):
+        pass
+
+    def snapshot(self):
+        title, sub = self.INFO.get(self.kind, ("", ""))
+        return {"name": "pb", "phase": self.phase, "kind": self.kind, "si": self.si + 1, "n": len(self.order),
+                "title": title, "sub": sub, "left": round(max(0.0, self.left), 1), "next": self.next_n,
+                "cleared": self.cleared,
+                "t": [[t["id"], t["k"], round(t["x"]), round(t["y"]), t["r"], t["n"], round(t["t"], 2),
+                       round(t["life"], 2)] for t in self.targets],
+                "p": [{"score": p["score"], "ammo": p["ammo"], "msg": p["msg"], "gain": p["gain"]}
+                      for p in self.players],
+                "fx": [[f[0], f[1], f[2], round(f[3], 2), f[4], f[5]] for f in self.fx]}
+
+
 # ------------------------------------------------------------------------------- rendering
 class Renderer:
     def __init__(self):
@@ -710,6 +921,134 @@ class Renderer:
             for k, i in enumerate(conn):
                 self.text(surf, "PLAYER %d   %d damage" % (i + 1, sc["p"][i]["dmg"]), "l", (W // 2, 340 + k * 56), COLORS[i], center=True)
 
+    # ---- point blank
+    def shadow(self, surf, s, key, pos, color=(255, 255, 255), center=False, right=False):
+        self.text(surf, s, key, (pos[0] + 2, pos[1] + 2), (0, 0, 0), center=center, right=right)
+        return self.text(surf, s, key, pos, color, center=center, right=right)
+
+    def figure(self, surf, x, cy, bad):
+        pygame.draw.rect(surf, (60, 40, 30) if bad else (60, 120, 200), (x - 42, cy + 24, 84, 120), border_radius=12)
+        if bad:
+            pygame.draw.rect(surf, (20, 20, 20), (x + 14, cy + 40, 56, 14))               # gun
+            pygame.draw.rect(surf, (20, 20, 20), (x + 54, cy + 36, 12, 30))
+        else:
+            pygame.draw.line(surf, (240, 200, 170), (x - 40, cy + 40), (x - 62, cy - 10), 9)   # hands up
+            pygame.draw.line(surf, (240, 200, 170), (x + 40, cy + 40), (x + 62, cy - 10), 9)
+        pygame.draw.circle(surf, (225, 190, 150) if bad else (245, 205, 175), (x, cy), 26)
+        if bad:
+            pygame.draw.rect(surf, (200, 30, 30), (x - 26, cy + 4, 52, 16))                # bandana
+            pygame.draw.rect(surf, (20, 20, 20), (x - 44, cy - 24, 88, 8))                 # hat brim
+            pygame.draw.rect(surf, (20, 20, 20), (x - 24, cy - 52, 48, 32), border_radius=6)
+            pygame.draw.circle(surf, (255, 255, 255), (x - 9, cy - 6), 4)
+            pygame.draw.circle(surf, (255, 255, 255), (x + 9, cy - 6), 4)
+            pygame.draw.circle(surf, (0, 0, 0), (x - 9, cy - 6), 2)
+            pygame.draw.circle(surf, (0, 0, 0), (x + 9, cy - 6), 2)
+        else:
+            pygame.draw.circle(surf, (250, 220, 90), (x, cy - 14), 24, draw_top_left=True, draw_top_right=True)
+            pygame.draw.circle(surf, (0, 0, 0), (x - 9, cy - 4), 3)
+            pygame.draw.circle(surf, (0, 0, 0), (x + 9, cy - 4), 3)
+            pygame.draw.arc(surf, (160, 60, 60), (x - 10, cy + 2, 20, 14), 3.4, 6.0, 2)
+
+    def pb_background(self, surf, kind):
+        if kind in ("balloon", "plate"):
+            surf.blit(self.sky, (0, 0))
+            for cx, cy, r in self.clouds:
+                for k in range(3):
+                    pygame.draw.circle(surf, (250, 250, 255), (cx + k * r * 0.8, cy + (k % 2) * 8), r * 0.6)
+            if kind == "plate":
+                pygame.draw.rect(surf, (96, 150, 70), (0, H - 130, W, 130))
+        elif kind == "bad":
+            surf.fill((150, 200, 240))
+            pygame.draw.rect(surf, (140, 95, 60), (0, 140, W, H - 140))
+            for y in range(150, H, 34):
+                pygame.draw.line(surf, (110, 72, 44), (0, y), (W, y), 3)
+            pygame.draw.rect(surf, (90, 60, 40), (0, 120, W, 30))
+            self.shadow(surf, "SALOON", "l", (W // 2, 134), (240, 220, 160), center=True)
+        elif kind == "bull":
+            surf.fill((84, 90, 100))
+            for x in range(0, W, 120):
+                pygame.draw.line(surf, (70, 76, 86), (x, 0), (x, H), 4)
+            pygame.draw.rect(surf, (60, 64, 72), (0, H - 130, W, 130))
+        else:
+            surf.fill((24, 34, 64))
+            for x in range(0, W, 60):
+                pygame.draw.line(surf, (36, 50, 90), (x, 0), (x, H), 1)
+            for y in range(0, H, 60):
+                pygame.draw.line(surf, (36, 50, 90), (0, y), (W, y), 1)
+
+    def pb_scene(self, surf, sc, state, me):
+        kind = sc["kind"]
+        self.pb_background(surf, kind)
+        if kind == "bad":
+            for j, (sx, sy) in enumerate(PointBlank.SLOTS):
+                rect = pygame.Rect(sx - 85, sy - 95, 170, 190)
+                pygame.draw.rect(surf, (25, 18, 14), rect)
+                surf.set_clip(rect)
+                for t in sc["t"]:
+                    if t[1] in ("bad", "civ") and abs(t[2] - sx) < 3 and abs(t[3] - (sy + 10)) < 3:
+                        pop = PointBlank.pop({"t": t[6], "life": t[7]})
+                        self.figure(surf, sx, sy + 10 + (1 - pop) * 190, t[1] == "bad")
+                surf.set_clip(None)
+                pygame.draw.rect(surf, (80, 50, 30), rect.inflate(16, 16), 10)
+                pygame.draw.rect(surf, (80, 50, 30), (sx - 100, sy + 90, 200, 14))
+        for tid, k, x, y, r, n, age, life in sc["t"]:
+            if k == "num":
+                pulse = 6 + 4 * math.sin(age * 8)
+                if n == sc["next"]:
+                    pygame.draw.circle(surf, (255, 240, 90), (x, y), int(r + pulse), 5)
+                for rr, col in ((r, (200, 40, 40)), (r * 0.78, (250, 250, 250)), (r * 0.52, (200, 40, 40)), (r * 0.3, (250, 250, 250))):
+                    pygame.draw.circle(surf, col, (x, y), int(rr))
+                pygame.draw.circle(surf, (20, 20, 20), (x, y), r, 3)
+                self.text(surf, str(n), "l", (x, y), (20, 20, 30), center=True)
+            elif k == "balloon":
+                col = [(230, 60, 60), (70, 130, 240), (250, 200, 50), (80, 190, 90), (200, 90, 220), (250, 140, 50)][n]
+                pygame.draw.line(surf, (60, 60, 60), (x, y + r), (x + 6, y + r + 46), 2)
+                pygame.draw.ellipse(surf, col, (x - 38, y - 48, 76, 92))
+                pygame.draw.polygon(surf, col, [(x - 7, y + 44), (x + 7, y + 44), (x, y + 54)])
+                pygame.draw.ellipse(surf, (255, 255, 255), (x - 22, y - 32, 14, 24))
+            elif k == "plate":
+                pygame.draw.ellipse(surf, (240, 120, 30), (x - 38, y - 12, 76, 24))
+                pygame.draw.ellipse(surf, (170, 70, 10), (x - 38, y - 12, 76, 24), 3)
+                pygame.draw.ellipse(surf, (255, 190, 100), (x - 18, y - 8, 36, 10))
+            elif k == "bull":
+                for rr, col in ((1.0, (250, 250, 250)), (0.8, (20, 20, 20)), (0.6, (60, 110, 220)), (0.4, (220, 40, 40)), (0.2, (250, 220, 40))):
+                    pygame.draw.circle(surf, col, (x, y), int(r * rr))
+                    pygame.draw.circle(surf, (0, 0, 0), (x, y), int(r * rr), 2)
+                pygame.draw.arc(surf, (255, 255, 255), (x - r - 10, y - r - 10, 2 * r + 20, 2 * r + 20), 1.57, 1.57 + 6.28 * max(0, 1 - age / life), 6)
+        for x, y, txt, age, slot, good in sc["fx"]:
+            pygame.draw.circle(surf, COLORS[slot], (x, y), int(8 + age * 70), 3)
+            if txt:
+                self.shadow(surf, txt, "m", (x, y - 30 - age * 70), (120, 255, 140) if good else (255, 120, 120), center=True)
+        self.shadow(surf, "STAGE %d/%d  %s" % (sc["si"], sc["n"], sc["title"]), "m", (W // 2, 44), center=True)
+        self.shadow(surf, "%02d" % int(sc["left"] + 0.99), "l", (W - 40, 32), right=True)
+        conn = [i for i, p in enumerate(state["pl"]) if p["c"]]
+        for k, i in enumerate(conn):
+            x, p = 44 + k * 310, sc["p"][i]
+            self.shadow(surf, "P%d  %d" % (i + 1, p["score"]), "l", (x, H - 112), COLORS[i])
+            for b in range(PointBlank.MAG):
+                pygame.draw.rect(surf, (255, 215, 90) if b < p["ammo"] else (70, 55, 40),
+                                 pygame.Rect(x + b * 20, H - 66, 12, 26), border_radius=5)
+            self.shadow(surf, p["msg"], "m", (x + 180, H - 62))
+        if sc["phase"] in ("intro", "outro", "over"):
+            ov = pygame.Surface((W, H), pygame.SRCALPHA)
+            ov.fill((0, 0, 0, 150))
+            surf.blit(ov, (0, 0))
+        if sc["phase"] == "intro":
+            self.text(surf, sc["title"], "xl", (W // 2, 250), (255, 220, 90), center=True)
+            self.text(surf, sc["sub"], "l", (W // 2, 350), center=True)
+        elif sc["phase"] == "outro":
+            self.text(surf, "STAGE CLEAR!" if sc["cleared"] else "TIME UP", "xl", (W // 2, 220), (255, 220, 90) if sc["cleared"] else (255, 140, 120), center=True)
+            for k, i in enumerate(conn):
+                self.text(surf, "PLAYER %d   %+d" % (i + 1, sc["p"][i]["gain"]), "l", (W // 2, 330 + k * 56), COLORS[i], center=True)
+        elif sc["phase"] == "over":
+            self.text(surf, "GAME OVER", "xl", (W // 2, 170), (255, 220, 90), center=True)
+            best = max((sc["p"][i]["score"] for i in conn), default=0)
+            winners = [i for i in conn if sc["p"][i]["score"] == best]
+            if len(conn) > 1:
+                self.text(surf, ("PLAYER %d WINS!" % (winners[0] + 1)) if len(winners) == 1 else "IT'S A TIE!", "l", (W // 2, 250), center=True)
+            for k, i in enumerate(conn):
+                self.text(surf, "PLAYER %d   %d points" % (i + 1, sc["p"][i]["score"]), "l", (W // 2, 330 + k * 56), COLORS[i], center=True)
+
     def crosshairs(self, surf, state, me):
         for i, p in enumerate(state["pl"]):
             if not p["c"]:
@@ -724,7 +1063,8 @@ class Renderer:
 
     def draw(self, surf, state, me, status, banner, help_line):
         sc = state["sc"]
-        {"test": self.tester, "duck": self.duck_scene, "printer": self.printer_scene}[sc["name"]](surf, sc, state, me)
+        {"test": self.tester, "duck": self.duck_scene, "printer": self.printer_scene,
+         "pb": self.pb_scene}[sc["name"]](surf, sc, state, me)
         self.crosshairs(surf, state, me)
         bar = pygame.Rect(0, H - 138, W, 138)
         if sc["name"] == "test":
@@ -735,14 +1075,14 @@ class Renderer:
                 self.text(surf, s, "s", (36, bar.y + 40 + k * 18), (150, 155, 170))
             self.text(surf, help_line, "s", (36, bar.y + 84), (110, 200, 255))
         else:
-            self.text(surf, "F1 test  F2 ducks  F3 printer  -/= border  Esc", "s", (36, 36), (30, 40, 70))
+            self.shadow(surf, "F1 test  F2-F4 games  -/= border  Esc", "s", (36, 36))
         if banner:
             r = self.text(surf, banner, "l", (W // 2, 100), (255, 255, 255), center=True)
             pygame.draw.rect(surf, (200, 60, 60), r.inflate(40, 16), 3, border_radius=10)
 
 
 # ---------------------------------------------------------------------------------- the app
-HELP_HOST = ("F1 tester   F2 ducks   F3 printer   F5 kick   F6 rapid kicks   F7 recoil mode   F8/F9 strength   "
+HELP_HOST = ("F1 tester   F2 ducks   F3 printer   F4 point blank   F5 kick   F6 rapid kicks   F7 recoil mode   F8/F9 strength   "
              "-/= border   F10 learn   F11 fullscreen   F12 reset   Esc quit")
 HELP_CLIENT = "-/= border   F10 learn buttons   F11 fullscreen   Esc quit   (the host picks the game)"
 
@@ -858,6 +1198,8 @@ class App:
             self.scene = Duck()
         elif k == pygame.K_F3:
             self.scene = Printer()
+        elif k == pygame.K_F4:
+            self.scene = PointBlank()
         elif k == pygame.K_F7:
             hub.rmode = RMODES[(RMODES.index(hub.rmode) + 1) % len(RMODES)]
         elif k == pygame.K_F8:
