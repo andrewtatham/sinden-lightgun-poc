@@ -2,3 +2,6 @@
 __pycache__/
 *.pyc
 *.bak
+
+# Sinden driver download (not ours to redistribute)
+SindenLightgunSoftwareReleaseV2.08b/

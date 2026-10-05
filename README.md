@@ -13,12 +13,14 @@ Linux (already set up):
     ./run.sh                        # this PC only: uses every gun it finds (1 or 2)
     ./run.sh --host                 # host a LAN game (prints the address to join)
 
-Windows 11 (the other PC):
+Windows 11 (this PC only, one gun - clone the repo, no need to copy files by hand):
 
-    py -m pip install pygame-ce pyserial
-    py lightgun.py --join <the Linux PC's address>
+    py -m venv .venv
+    .venv\Scripts\pip install -r requirements.txt
+    .venv\Scripts\python lightgun.py                      # this PC only
+    .venv\Scripts\python lightgun.py --join <the host's address>   # join a LAN game
 
-Copy `lightgun.py`, `gunio.py` and `net.py` to the Windows PC. The host picks the game;
+Start the Sinden driver first (see *Sinden driver setup* below). The host picks the game;
 clients just send their gun and show what the host shows. Port 5555/TCP.
 
 ## Keys (on the host)
@@ -164,6 +166,28 @@ A quick check that both cameras can stream together, without the driver (substit
 **Which gun is which colour.** Player slots (and so colours in the app) follow the gun's USB product id,
 not the port it is plugged into: `0f02` is player 1 (red) and `0f01` is player 2 (blue). A lone gun keeps
 its own colour. Both ids appear in `lsusb` as `16c0:0f01` / `16c0:0f02`.
+
+### Windows
+
+Download the Windows software from the same page and unpack it anywhere (it is in `.gitignore` if you
+put it in the project folder). Run `SindenLightgun\Lightgun.exe` **before** starting the game, then
+calibrate from its tray menu. The driver is what makes the gun steer the system mouse, which is all this
+app reads on Windows, so without it the crosshair follows your normal mouse.
+
+The stock `Lightgun.exe.Config` has the same problem as the Linux one, with different codes: front-left
+sends right-click (so button A reads as RELOAD) and rear-right sends a key that cycles the border.
+Close the driver, then set these in `Lightgun.exe.Config` (the `cbButton...` keys, for `Offscreen` and the
+`B` player-2 variants as well) and start it again:
+
+| Setting | Value |
+|---|---|
+| `cbButtonFrontLeft` | `44` (keyboard `a`) |
+| `cbButtonRearLeft` | `9` (keyboard `1`) |
+| `cbButtonFrontRight` | `2` (middle click) |
+| `cbButtonRearRight` | `13` (keyboard `5`) |
+
+These are the same codes as the Linux setup, so the default mapping (A/B/C/D) matches. The driver's GUI may
+rewrite the file, so re-check it if the buttons drift.
 
 ## Files
 
