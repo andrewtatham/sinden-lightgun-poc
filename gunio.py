@@ -36,6 +36,9 @@ DEFAULT_MAP = {"mouseleft": "TRIGGER", "mouseright": "RELOAD",
                # ~/sinden-software (every button needs its own code - stock Sinden sends right-click
                # for BOTH the pump/reload and front-left buttons, which can't be told apart).
                "a": "A", "1": "B", "mousemiddle": "C", "5": "D"}
+# Which player slot (= colour in the app) each gun's USB product id gets: 0f02 -> slot 1 (red),
+# 0f01 -> slot 2 (blue). Fixed per gun, so a lone gun keeps its own colour.
+SLOT_OF_PID = {0x0F02: 0, 0x0F01: 1, 0x0F03: 2, 0x0F04: 3}
 MAP_FILE = Path.home() / ".sinden-poc-mapping.json"
 
 _ALIASES = {"return": "enter", "escape": "esc", "pgup": "pageup", "pgdn": "pagedown"}
@@ -73,13 +76,14 @@ class Gun:
         self.aim = (0.5, 0.5)          # fraction of the screen, 0..1
         self.has_aim = False           # have we ever received a position from it?
         self.port_key = None           # USB port path, used to pair with its serial port
+        self.absent = False            # placeholder for a player slot whose gun isn't plugged in
 
 
 # --------------------------------------------------------------------------- input backends
 class EvdevInput:
     kind = "evdev"
 
-    def __init__(self, grab=True):
+    def __init__(self, grab=True, pad_slots=False):
         import evdev
         from evdev import ecodes
         self.ec = ecodes
@@ -105,7 +109,12 @@ class EvdevInput:
             except OSError:
                 continue
             groups.setdefault(phys.split("/input")[0], []).append((dev, phys))
-        for key in sorted(groups):
+        # Player order follows the gun's USB product id, not the port it happens to be plugged
+        # into, so colours/slots stay put when you move cables or hubs.
+        def slot(key):
+            return SLOT_OF_PID.get(groups[key][0][0].info.product, 9)
+        placed = {}
+        for key in sorted(groups, key=lambda k: (slot(k), k)):
             gun = Gun("Sinden gun (%s)" % key.replace("usb-", ""))
             m = re.search(r"-(\d+(?:\.\d+)*)$", key)
             gun.port_key = m.group(1) if m else None
@@ -124,9 +133,24 @@ class EvdevInput:
                         dev.grab()
                     except OSError:
                         pass
-            self.guns.append(gun)
-            self._devs.append([d for d, _ in groups[key]])
-            self._range.append(rng)
+            n = slot(key)
+            while n in placed:
+                n += 1
+            placed[n] = (gun, [d for d, _ in groups[key]], rng)
+        order = sorted(placed)
+        count = (order[-1] + 1) if (pad_slots and order) else len(order)
+        for i in range(count):
+            if pad_slots and i in placed:
+                entry = placed[i]
+            elif pad_slots:
+                gone = Gun("(no gun for player %d)" % (i + 1))
+                gone.absent, gone.connected = True, False
+                entry = (gone, [], [0, 32767, 0, 32767])
+            else:
+                entry = placed[order[i]]
+            self.guns.append(entry[0])
+            self._devs.append(entry[1])
+            self._range.append(entry[2])
 
     def describe(self):
         if self.guns:
@@ -210,10 +234,11 @@ class PygameInput:
         pass
 
 
-def make_input(kind, grab=True):
+def make_input(kind, grab=True, pad_slots=False):
+    """pad_slots: leave an 'absent' placeholder for any player slot below a present gun's."""
     if kind in ("auto", "evdev"):
         try:
-            inp = EvdevInput(grab=grab)
+            inp = EvdevInput(grab=grab, pad_slots=pad_slots)
             if inp.guns or kind == "evdev":
                 return inp
             note = inp.describe()
@@ -334,6 +359,6 @@ def pair_recoils(guns, serial_overrides=None, enabled=True):
         result.append(dev)
     spare = [d for d in devices if d not in used]
     for i, dev in enumerate(result):                 # second pass: leftovers in order
-        if dev is None and spare:
+        if dev is None and spare and not guns[i].absent:
             result[i] = spare.pop(0)
-    return [Recoil(d) if d else None for d in result]
+    return [Recoil(d) if d and not g.absent else None for g, d in zip(guns, result)]

@@ -1098,7 +1098,8 @@ class App:
         pygame.mouse.set_visible(False)
         self.clock = pygame.time.Clock()
         self.r = Renderer()
-        self.backend = backend or gunio.make_input(args.input, grab=not args.no_grab)
+        self.backend = backend or gunio.make_input(args.input, grab=not args.no_grab,
+                                                       pad_slots=not (args.join))
         self.guns = self.backend.guns
         self.mapping = gunio.load_mapping()
         serials = args.serial.split(",") if args.serial else None
@@ -1118,6 +1119,9 @@ class App:
         else:
             n = min(len(self.guns), MAXP)
             self.hub, self.scene = Hub(n), Tester()
+            for i, g in enumerate(self.guns[:n]):
+                if g.absent:
+                    self.hub.slots[i]["c"] = False
             self.me = list(range(n))
             if self.role == "host":
                 import net
@@ -1213,6 +1217,8 @@ class App:
         hub = self.hub
         per = self.read_local(pg_events)
         for i, g in enumerate(self.guns[:MAXP]):
+            if g.absent:
+                continue                 # slot may be taken by a remote player
             sl = hub.slots[i]
             sl.update(aim=list(g.aim), has=g.has_aim, name=g.name, c=g.connected,
                       rc=self.recoils[i].status if self.recoils[i] else "no recoil serial port")
