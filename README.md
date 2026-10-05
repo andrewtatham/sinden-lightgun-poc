@@ -112,6 +112,59 @@ pump/reload button and the front-left button the same right-click, so no program
 The tester's default mapping then matches: A = `a`, B = `1`, C = middle click, D = `5`.
 Use F10 in the tester to learn anything different, or `rawdump.py` to see what each button sends.
 
+## USB setup (read this if the second gun misbehaves)
+
+Each Sinden gun is really a small USB hub with the gun (buttons, recoil serial port) and a
+high-speed camera behind it. Two guns on one PC put two continuously streaming cameras on the bus,
+and that is where most problems come from.
+
+**Give each gun its own USB connection to the PC.**
+
+* Each camera asks the USB 2 bus for a fixed, large slice of isochronous bandwidth (it always uses the
+  same setting, whatever the resolution). One USB 2 port can only reserve about 80% of 480 Mbit/s, and
+  two of these cameras together are just over that. Lowering `CameraRes` in the driver config does not help.
+* The symptom when both guns share one hub: the kernel logs `Not enough bandwidth for altsetting 3`, the
+  driver prints `VIDIOC_STREAMON error 28, No space left on device`, then crashes with a SIGSEGV.
+* So: **never plug both guns into the same hub** (a monitor's USB hub, a 4-port hub, a front-panel header that
+  uses an internal hub). Plug them into separate root ports, for example one into the back of the PC
+  and one into a powered hub on another port. Any two ports that are not behind the same hub will do.
+  USB 3 (blue) vs USB 2 doesn't matter: the guns are USB 2 devices either way.
+* One gun on a hub is fine, as is a gun on a rear motherboard port. Front-panel ports go through
+  longer internal cabling and are the least reliable.
+
+**Power and cables.**
+
+* A hub or port that is marginal on power makes a gun's whole internal hub drop off the bus and come back,
+  every few seconds (kernel log: `USB disconnect` then `new high-speed USB device`, often with
+  `clear tt ... error -110`). Each time it comes back as a new `/dev/ttyACM*`. Use a short, good data cable,
+  and a **powered** hub if you need one.
+* After repeated resets a gun's firmware can hang: its serial port then times out on every write
+  (`write timeout`) and the driver can't start. Unplug the gun's USB cable, wait about ten seconds
+  and plug it back in. A software re-enumerate (`authorized` toggle) does the same thing.
+* Turn off Linux USB autosuspend while testing, as it can drop devices that look idle:
+  `echo -1 | sudo tee /sys/module/usbcore/parameters/autosuspend`
+  (make it permanent with `usbcore.autosuspend=-1` on the kernel command line).
+* A wedged mouse or other device after unplugging and replugging guns is usually cured by replugging
+  that device.
+
+**Watching what the bus is doing.**
+
+    lsusb -t                                        # who is behind which hub and root port
+    journalctl -k -f | grep -E "usb [0-9]-|bandwidth"   # disconnects, resets, bandwidth errors
+    tail ~/sinden-software/driver.log                # what the Sinden driver complains about
+
+A quick check that both cameras can stream together, without the driver (substitute your
+`/dev/video*` nodes from `v4l2-ctl --list-devices`; both should run at about 60 fps with no error):
+
+    v4l2-ctl -d /dev/video0 --set-fmt-video=width=640,height=480,pixelformat=MJPG --set-parm=60 \
+        --stream-mmap --stream-count=600 --stream-to=/dev/null &
+    v4l2-ctl -d /dev/video4 --set-fmt-video=width=640,height=480,pixelformat=MJPG --set-parm=60 \
+        --stream-mmap --stream-count=600 --stream-to=/dev/null
+
+**Which gun is which colour.** Player slots (and so colours in the app) follow the gun's USB product id,
+not the port it is plugged into: `0f02` is player 1 (red) and `0f01` is player 2 (blue). A lone gun keeps
+its own colour. Both ids appear in `lsusb` as `16c0:0f01` / `16c0:0f02`.
+
 ## Files
 
 * `lightgun.py` - the app (tester, Duck Hunt, printer stage, LAN host/client)
